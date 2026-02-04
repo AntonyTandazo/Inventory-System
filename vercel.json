@@ -1,0 +1,27 @@
+{
+    "version": 2,
+    "env": {
+        "SUPABASE_URL": "@supabase_url",
+        "SUPABASE_ANON_KEY": "@supabase_anon_key"
+    },
+    "buildCommand": "cd frontend && npm install && npm run build",
+    "outputDirectory": "frontend/dist",
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/backend/app.js"
+        },
+        {
+            "handle": "filesystem"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/frontend/dist/index.html"
+        }
+    ],
+    "functions": {
+        "backend/app.js": {
+            "runtime": "nodejs18.x"
+        }
+    }
+}

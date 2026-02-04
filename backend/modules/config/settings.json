@@ -1,0 +1,28 @@
+{
+  "negocio": {
+    "nombre": "InventoryGore2.0",
+    "telefono": "",
+    "email": "eldeatgunt2070@gmail.com",
+    "direccion": ""
+  },
+  "notificaciones": {
+    "stockBajo": true,
+    "cobranza": true,
+    "nuevosPedidos": true
+  },
+  "metodosPago": {
+    "efectivo": true,
+    "tarjeta": true,
+    "transferencia": true
+  },
+  "seguridad": {
+    "pin": "8520"
+  },
+  "adminUser": {
+    "usuario": "Tandazo",
+    "password": "74123698",
+    "nombre": "antony tandazo",
+    "email": "eldeatgunt2070@gmail.com"
+  },
+  "hasPin": true
+}
