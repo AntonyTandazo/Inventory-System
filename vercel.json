@@ -1,8 +1,7 @@
 {
-    "rewrites": [
-        {
-            "source": "/api/(.*)",
-            "destination": "/backend/app.js"
-        }
-    ]
+  "functions": {
+    "api/*.php": {
+      "runtime": "vercel-php@0.7.0"
+    }
+  }
 }
