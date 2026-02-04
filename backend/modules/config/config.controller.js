@@ -71,7 +71,7 @@ const configController = {
             if (!usuario || !password) return res.status(400).json({ error: 'Usuario y Contraseña requeridos' });
 
             // Call model to register (DB or Simulation)
-            await configModel.registerUser({ usuario, password, nombre, negocio, email });
+            const newUser = await configModel.registerUser({ usuario, password, nombre, negocio, email });
 
             // Note: PIN is currently stored in settings.json (simulation) or needs to be in DB.
             // Since DB schema provided by user DOES NOT HAVE PIN, we might lose it for DB users unless we add it.
@@ -81,7 +81,13 @@ const configController = {
                 configModel.saveSettings({ seguridad: { pin } });
             }
 
-            res.json({ message: 'Usuario registrado correctamente' });
+            // Return user data for auto-login (same format as login endpoint)
+            res.json({
+                message: 'Usuario registrado correctamente',
+                usuarioId: newUser.id,
+                usuario: newUser.usuario,
+                negocio: negocio
+            });
         } catch (error) {
             console.error(error); // Log error
             res.status(500).json({ error: error.message });
