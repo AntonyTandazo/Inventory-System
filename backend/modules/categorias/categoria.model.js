@@ -1,4 +1,5 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
+const { toOracleFormat } = require('../../config/helpers');
 
 // Datos simulados
 let categoriasSimuladas = [
@@ -19,34 +20,49 @@ const categoriaModel = {
                 ? categoriasSimuladas
                 : categoriasSimuladas.filter(c => c.ACTIVO == 1);
         }
-        const conn = await getConnection();
-        const sql = incluirInactivas
-            ? 'SELECT * FROM CATEGORIAS WHERE USUARIO_ID = :usuarioId ORDER BY NOMBRE'
-            : 'SELECT * FROM CATEGORIAS WHERE ACTIVO = 1 AND USUARIO_ID = :usuarioId ORDER BY NOMBRE';
 
-        try {
-            console.log('[CATEGORIAS] Executing query with usuarioId:', usuarioId);
-            const result = await conn.execute(sql, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            await conn.close();
-            console.log('[CATEGORIAS] Found', result.rows.length, 'categories');
-            return result.rows;
-        } catch (e) {
-            console.error('[CATEGORIAS] Error obtaining categories:', e.message);
-            console.error('[CATEGORIAS] SQL was:', sql);
-            await conn.close();
+        const supabase = await getConnection();
+
+        let query = supabase
+            .from('categorias')
+            .select('*')
+            .eq('usuario_id', usuarioId)
+            .order('nombre');
+
+        if (!incluirInactivas) {
+            query = query.eq('activo', 1);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('[CATEGORIAS] Error obtaining categories:', error.message);
             return [];
         }
+
+        console.log('[CATEGORIAS] Found', data.length, 'categories');
+        return toOracleFormat(data);
     },
 
     async buscarPorNombre(nombre, usuarioId = 1) {
         if (USE_SIMULATION) {
             return categoriasSimuladas.find(c => c.NOMBRE.toLowerCase() === nombre.toLowerCase());
         }
-        const conn = await getConnection();
-        const sql = 'SELECT * FROM CATEGORIAS WHERE LOWER(NOMBRE) = LOWER(:nombre) AND USUARIO_ID = :usuarioId';
-        const result = await conn.execute(sql, { nombre, usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        await conn.close();
-        return result.rows[0];
+
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('categorias')
+            .select('*')
+            .ilike('nombre', nombre)
+            .eq('usuario_id', usuarioId)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null; // Not found
+            throw error;
+        }
+
+        return toOracleFormat(data);
     },
 
     async crear(nombre, usuarioId = 1) {
@@ -55,11 +71,21 @@ const categoriaModel = {
             categoriasSimuladas.push(nueva);
             return nueva;
         }
-        const conn = await getConnection();
-        const sql = 'INSERT INTO CATEGORIAS (USUARIO_ID, NOMBRE, ACTIVO) VALUES (:usuarioId, :nombre, 1)';
-        await conn.execute(sql, { usuarioId, nombre }, { autoCommit: true });
-        await conn.close();
-        return { NOMBRE: nombre, ACTIVO: 1 };
+
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('categorias')
+            .insert([{
+                usuario_id: usuarioId,
+                nombre: nombre,
+                activo: 1
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return toOracleFormat(data);
     },
 
     async actualizar(id, nombre) {
@@ -71,10 +97,14 @@ const categoriaModel = {
             }
             return false;
         }
-        const conn = await getConnection();
-        const sql = 'UPDATE CATEGORIAS SET NOMBRE = :nombre WHERE ID = :id';
-        await conn.execute(sql, { nombre, id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('categorias')
+            .update({ nombre })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -88,10 +118,14 @@ const categoriaModel = {
             }
             return false;
         }
-        const conn = await getConnection();
-        const sql = 'UPDATE CATEGORIAS SET ACTIVO = 0 WHERE ID = :id';
-        await conn.execute(sql, { id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('categorias')
+            .update({ activo: 0 })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -104,10 +138,14 @@ const categoriaModel = {
             }
             return false;
         }
-        const conn = await getConnection();
-        const sql = 'UPDATE CATEGORIAS SET ACTIVO = 1 WHERE ID = :id';
-        await conn.execute(sql, { id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('categorias')
+            .update({ activo: 1 })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     }
 };

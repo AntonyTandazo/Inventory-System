@@ -1,4 +1,5 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
+const { toOracleFormat } = require('../../config/helpers');
 
 let clientesSimulados = [
     { ID: 1, NOMBRE: 'Consumidor Final', TELEFONO: '', DIRECCION: '', DEUDA: 0, CEDULA: '9999999999', EMAIL: '', ESTADO: 'Activo', FECHA_REGISTRO: new Date() },
@@ -12,17 +13,20 @@ let clientesSimulados = [
 const clienteModel = {
     async obtenerTodos(usuarioId = 1) {
         if (USE_SIMULATION) return clientesSimulados;
-        const conn = await getConnection();
-        const sql = 'SELECT * FROM CLIENTES WHERE USUARIO_ID = :usuarioId ORDER BY ID DESC';
-        try {
-            const result = await conn.execute(sql, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            await conn.close();
-            return result.rows;
-        } catch (error) {
+
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('clientes')
+            .select('*')
+            .eq('usuario_id', usuarioId)
+            .order('id', { ascending: false });
+
+        if (error) {
             console.error('Error obtaining clients:', error);
-            await conn.close();
             return [];
         }
+
+        return toOracleFormat(data);
     },
 
     async getStatistics(usuarioId = 1) {
@@ -38,31 +42,47 @@ const clienteModel = {
             };
         }
 
-        const conn = await getConnection();
-        const sqlTotal = 'SELECT COUNT(*) AS CANTIDAD FROM CLIENTES WHERE USUARIO_ID = :usuarioId';
-        const sqlActivos = "SELECT COUNT(*) AS CANTIDAD FROM CLIENTES WHERE USUARIO_ID = :usuarioId AND ESTADO = 'Activo'";
-        const sqlDeuda = 'SELECT COUNT(*) AS CANTIDAD FROM CLIENTES WHERE USUARIO_ID = :usuarioId AND DEUDA > 0';
-        const sqlNuevos = "SELECT COUNT(*) AS CANTIDAD FROM CLIENTES WHERE USUARIO_ID = :usuarioId AND FECHA_REGISTRO >= TRUNC(SYSDATE, 'MM')";
+        const supabase = await getConnection();
 
-        const [total, activos, deuda, nuevos] = await Promise.all([
-            conn.execute(sqlTotal, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-            conn.execute(sqlActivos, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-            conn.execute(sqlDeuda, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-            conn.execute(sqlNuevos, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT })
-        ]);
+        // Get total count
+        const { count: total } = await supabase
+            .from('clientes')
+            .select('*', { count: 'exact', head: true })
+            .eq('usuario_id', usuarioId);
 
-        await conn.close();
+        // Get active count
+        const { count: activos } = await supabase
+            .from('clientes')
+            .select('*', { count: 'exact', head: true })
+            .eq('usuario_id', usuarioId)
+            .eq('estado', 'Activo');
+
+        // Get count with debt
+        const { count: conDeuda } = await supabase
+            .from('clientes')
+            .select('*', { count: 'exact', head: true })
+            .eq('usuario_id', usuarioId)
+            .gt('deuda', 0);
+
+        // Get new clients this month
+        const now = new Date();
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const { count: nuevosMes } = await supabase
+            .from('clientes')
+            .select('*', { count: 'exact', head: true })
+            .eq('usuario_id', usuarioId)
+            .gte('fecha_registro', firstDayOfMonth.toISOString());
+
         return {
-            total: total.rows[0].CANTIDAD,
-            activos: activos.rows[0].CANTIDAD,
-            nuevosMes: nuevos.rows[0].CANTIDAD,
-            conDeuda: deuda.rows[0].CANTIDAD
+            total: total || 0,
+            activos: activos || 0,
+            nuevosMes: nuevosMes || 0,
+            conDeuda: conDeuda || 0
         };
     },
 
     async crear(cliente, usuarioId = 1) {
         if (USE_SIMULATION) {
-            // Check for duplicate CEDULA in simulation
             const duplicado = clientesSimulados.find(c => c.CEDULA === cliente.CEDULA);
             if (duplicado) {
                 throw new Error('Ya existe un cliente con esta cédula');
@@ -78,26 +98,25 @@ const clienteModel = {
             return nuevo;
         }
 
-        const conn = await getConnection();
+        const supabase = await getConnection();
 
-        try {
-            // Check for duplicate CEDULA
-            const checkSql = 'SELECT COUNT(*) AS CANTIDAD FROM CLIENTES WHERE CEDULA = :cedula AND USUARIO_ID = :usuarioId';
-            const checkResult = await conn.execute(checkSql, {
-                cedula: cliente.CEDULA,
-                usuarioId
-            }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        // Check for duplicate CEDULA
+        const { data: existing, error: checkError } = await supabase
+            .from('clientes')
+            .select('id')
+            .eq('cedula', cliente.CEDULA)
+            .eq('usuario_id', usuarioId)
+            .single();
 
-            if (checkResult.rows[0].CANTIDAD > 0) {
-                await conn.close();
-                throw new Error('Ya existe un cliente con esta cédula');
-            }
+        if (existing) {
+            throw new Error('Ya existe un cliente con esta cédula');
+        }
 
-            // Insert new client
-            const sql = `INSERT INTO CLIENTES (USUARIO_ID, NOMBRE, CEDULA, EMAIL, TELEFONO, DEUDA, DIRECCION, ESTADO, FECHA_REGISTRO) 
-                         VALUES (:usuarioId, :nombre, :cedula, :email, :telefono, :deuda, :direccion, :estado, CURRENT_TIMESTAMP)`;
-            await conn.execute(sql, {
-                usuarioId,
+        // Insert new client
+        const { data, error } = await supabase
+            .from('clientes')
+            .insert([{
+                usuario_id: usuarioId,
                 nombre: cliente.NOMBRE,
                 cedula: cliente.CEDULA,
                 email: cliente.EMAIL || '',
@@ -105,13 +124,12 @@ const clienteModel = {
                 deuda: cliente.DEUDA || 0,
                 direccion: cliente.DIRECCION,
                 estado: cliente.ESTADO || 'Activo'
-            }, { autoCommit: true });
-            await conn.close();
-            return cliente;
-        } catch (error) {
-            await conn.close();
-            throw error;
-        }
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+        return toOracleFormat(data);
     },
 
     async actualizar(id, cliente) {
@@ -123,33 +141,26 @@ const clienteModel = {
             }
             return null;
         }
-        const conn = await getConnection();
-        const sql = `UPDATE CLIENTES SET 
-                     NOMBRE = :nombre, 
-                     CEDULA = :cedula,
-                     EMAIL = :email,
-                     TELEFONO = :telefono, 
-                     DIRECCION = :direccion, 
-                     DEUDA = :deuda,
-                     ESTADO = :estado 
-                     WHERE ID = :id`;
-        await conn.execute(sql, {
-            nombre: cliente.NOMBRE,
-            cedula: cliente.CEDULA,
-            email: cliente.EMAIL,
-            telefono: cliente.TELEFONO,
-            direccion: cliente.DIRECCION,
-            deuda: cliente.DEUDA,
-            estado: cliente.ESTADO,
-            id: id
-        }, { autoCommit: true });
-        await conn.close();
-        return cliente;
-    },
 
-    // ... existing methods (sumarDeuda, registrarPago, eliminar)
-    // Mantengo los que estaban, solo asegurando de no borrarlos accidentalmente
-    // Como estoy reemplazando todo el bloque, debo re-escribirlos
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('clientes')
+            .update({
+                nombre: cliente.NOMBRE,
+                cedula: cliente.CEDULA,
+                email: cliente.EMAIL,
+                telefono: cliente.TELEFONO,
+                direccion: cliente.DIRECCION,
+                deuda: cliente.DEUDA,
+                estado: cliente.ESTADO
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return toOracleFormat(data);
+    },
 
     async eliminar(id) {
         if (USE_SIMULATION) {
@@ -157,9 +168,14 @@ const clienteModel = {
             clientesSimulados = clientesSimulados.filter(c => c.ID != id);
             return clientesSimulados.length < initialLength;
         }
-        const conn = await getConnection();
-        await conn.execute('DELETE FROM CLIENTES WHERE ID = :id', { id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('clientes')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -172,9 +188,25 @@ const clienteModel = {
             }
             return false;
         }
-        const conn = await getConnection();
-        await conn.execute('UPDATE CLIENTES SET DEUDA = DEUDA + :monto WHERE ID = :id', { monto, id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+
+        // Get current debt
+        const { data: cliente, error: getError } = await supabase
+            .from('clientes')
+            .select('deuda')
+            .eq('id', id)
+            .single();
+
+        if (getError) throw getError;
+
+        // Update with new debt
+        const { error } = await supabase
+            .from('clientes')
+            .update({ deuda: cliente.deuda + parseFloat(monto) })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -189,9 +221,27 @@ const clienteModel = {
             return false;
         }
 
-        const conn = await getConnection();
-        await conn.execute('UPDATE CLIENTES SET DEUDA = DEUDA - :monto WHERE ID = :id', { monto, id }, { autoCommit: true });
-        await conn.close();
+        const supabase = await getConnection();
+
+        // Get current debt
+        const { data: cliente, error: getError } = await supabase
+            .from('clientes')
+            .select('deuda')
+            .eq('id', id)
+            .single();
+
+        if (getError) throw getError;
+
+        // Calculate new debt
+        const newDeuda = Math.max(0, cliente.deuda - parseFloat(monto));
+
+        // Update with new debt
+        const { error } = await supabase
+            .from('clientes')
+            .update({ deuda: newDeuda })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     }
 };

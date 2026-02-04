@@ -1,4 +1,5 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
+const { toOracleFormat } = require('../../config/helpers');
 
 const productoModel = {
     async obtenerTodos(usuarioId = 1, incluirInactivos = false) {
@@ -6,34 +7,55 @@ const productoModel = {
             return incluirInactivos ? productosSimulados : productosSimulados.filter(p => p.ACTIVO == 1);
         }
 
-        const conn = await getConnection();
-        const baseWhere = incluirInactivos
-            ? 'p.USUARIO_ID = :usuarioId'
-            : 'p.ACTIVO = 1 AND p.USUARIO_ID = :usuarioId';
+        const supabase = await getConnection();
 
+        let query = supabase
+            .from('productos')
+            .select(`
+                id,
+                usuario_id,
+                categoria_id,
+                codigo,
+                nombre,
+                precio_venta,
+                precio_costo,
+                stock,
+                stock_minimo,
+                activo,
+                categorias:categoria_id (
+                    nombre
+                )
+            `)
+            .eq('usuario_id', usuarioId)
+            .order('id', { ascending: false });
 
-        const sql = `SELECT p.ID, p.USUARIO_ID, p.CATEGORIA_ID, p.CODIGO, p.NOMBRE,
-             p.PRECIO_VENTA AS PRECIO, p.PRECIO_COSTO, p.STOCK, p.STOCK_MINIMO, p.ACTIVO,
-             c.NOMBRE AS CATEGORIA
-             FROM PRODUCTOS p
-             LEFT JOIN CATEGORIAS c ON p.CATEGORIA_ID = c.ID AND c.USUARIO_ID = :usuarioId
-             WHERE ${baseWhere} 
-             ORDER BY p.ID DESC`;
+        if (!incluirInactivos) {
+            query = query.eq('activo', 1);
+        }
 
-        try {
-            console.log('[PRODUCTOS] Executing query with usuarioId:', usuarioId);
-            console.log('[PRODUCTOS] SQL:', sql);
-            const result = await conn.execute(sql, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            await conn.close();
-            console.log('[PRODUCTOS] Found', result.rows.length, 'products');
-            return result.rows;
-        } catch (e) {
-            console.error('[PRODUCTOS] Error obtaining products:', e.message);
-            console.error('[PRODUCTOS] SQL was:', sql);
-            console.error('[PRODUCTOS] Params:', { usuarioId });
-            await conn.close();
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('[PRODUCTOS] Error obtaining products:', error.message);
             return [];
         }
+
+        console.log('[PRODUCTOS] Found', data.length, 'products');
+
+        // Transform to Oracle format
+        return data.map(p => ({
+            ID: p.id,
+            USUARIO_ID: p.usuario_id,
+            CATEGORIA_ID: p.categoria_id,
+            CODIGO: p.codigo,
+            NOMBRE: p.nombre,
+            PRECIO: p.precio_venta,
+            PRECIO_COSTO: p.precio_costo,
+            STOCK: p.stock,
+            STOCK_MINIMO: p.stock_minimo,
+            ACTIVO: p.activo,
+            CATEGORIA: p.categorias?.nombre || null
+        }));
     },
 
     async getStatistics(usuarioId = 1) {
@@ -48,30 +70,54 @@ const productoModel = {
             };
         }
 
-        const conn = await getConnection();
+        const supabase = await getConnection();
+
         try {
-            const sqlTotal = 'SELECT COUNT(*) AS CANTIDAD FROM PRODUCTOS WHERE ACTIVO = 1 AND USUARIO_ID = :usuarioId';
-            const sqlBajo = 'SELECT COUNT(*) AS CANTIDAD FROM PRODUCTOS WHERE ACTIVO = 1 AND USUARIO_ID = :usuarioId AND STOCK <= STOCK_MINIMO';
-            const sqlCritico = 'SELECT COUNT(*) AS CANTIDAD FROM PRODUCTOS WHERE ACTIVO = 1 AND USUARIO_ID = :usuarioId AND STOCK < STOCK_MINIMO';
-            const sqlValor = 'SELECT SUM(PRECIO_VENTA * STOCK) AS VALOR FROM PRODUCTOS WHERE ACTIVO = 1 AND USUARIO_ID = :usuarioId';
+            // Get total count
+            const { count: total, error: errorTotal } = await supabase
+                .from('productos')
+                .select('*', { count: 'exact', head: true })
+                .eq('activo', 1)
+                .eq('usuario_id', usuarioId);
 
-            const [total, bajo, critico, valor] = await Promise.all([
-                conn.execute(sqlTotal, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-                conn.execute(sqlBajo, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-                conn.execute(sqlCritico, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-                conn.execute(sqlValor, { usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT })
-            ]);
+            // Get low stock count
+            const { count: bajoStock, error: errorBajo } = await supabase
+                .from('productos')
+                .select('*', { count: 'exact', head: true })
+                .eq('activo', 1)
+                .eq('usuario_id', usuarioId)
+                .lte('stock', supabase.raw('stock_minimo'));
 
-            await conn.close();
+            // Get critical stock count  
+            const { count: critico, error: errorCritico } = await supabase
+                .from('productos')
+                .select('*', { count: 'exact', head: true })
+                .eq('activo', 1)
+                .eq('usuario_id', usuarioId)
+                .lt('stock', supabase.raw('stock_minimo'));
+
+            // Get inventory value - need to fetch data for calculation
+            const { data: productos, error: errorValor } = await supabase
+                .from('productos')
+                .select('precio_venta, stock')
+                .eq('activo', 1)
+                .eq('usuario_id', usuarioId);
+
+            const valorInventario = productos?.reduce((sum, p) => sum + (p.precio_venta * p.stock), 0) || 0;
+
+            if (errorTotal || errorBajo || errorCritico || errorValor) {
+                console.error('Error getting stats:', errorTotal || errorBajo || errorCritico || errorValor);
+                return { total: 0, bajoStock: 0, critico: 0, valorInventario: 0 };
+            }
+
             return {
-                total: total.rows[0].CANTIDAD,
-                bajoStock: bajo.rows[0].CANTIDAD,
-                critico: critico.rows[0].CANTIDAD,
-                valorInventario: valor.rows[0].VALOR || 0
+                total: total || 0,
+                bajoStock: bajoStock || 0,
+                critico: critico || 0,
+                valorInventario: parseFloat(valorInventario.toFixed(2))
             };
         } catch (e) {
             console.error('Error stats:', e);
-            await conn.close();
             return { total: 0, bajoStock: 0, critico: 0, valorInventario: 0 };
         }
     },
@@ -80,22 +126,42 @@ const productoModel = {
         if (USE_SIMULATION) {
             return productosSimulados.find(p => p.CODIGO === codigo);
         }
-        const conn = await getConnection();
-        const sql = 'SELECT * FROM PRODUCTOS WHERE CODIGO = :codigo AND USUARIO_ID = :usuarioId';
-        const result = await conn.execute(sql, { codigo, usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        await conn.close();
-        return result.rows[0];
+
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('productos')
+            .select('*')
+            .eq('codigo', codigo)
+            .eq('usuario_id', usuarioId)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null; // Not found
+            throw error;
+        }
+
+        return toOracleFormat(data);
     },
 
     async buscarPorNombre(nombre, usuarioId = 1) {
         if (USE_SIMULATION) {
             return productosSimulados.find(p => p.NOMBRE.toLowerCase() === nombre.toLowerCase());
         }
-        const conn = await getConnection();
-        const sql = 'SELECT * FROM PRODUCTOS WHERE LOWER(NOMBRE) = LOWER(:nombre) AND USUARIO_ID = :usuarioId';
-        const result = await conn.execute(sql, { nombre, usuarioId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        await conn.close();
-        return result.rows[0];
+
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('productos')
+            .select('*')
+            .ilike('nombre', nombre)
+            .eq('usuario_id', usuarioId)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null; // Not found
+            throw error;
+        }
+
+        return toOracleFormat(data);
     },
 
     async crear(producto, usuarioId = 1) {
@@ -109,28 +175,34 @@ const productoModel = {
             return nuevo;
         }
 
-        const conn = await getConnection();
-        const sql = `INSERT INTO PRODUCTOS (USUARIO_ID, CATEGORIA_ID, CODIGO, NOMBRE, PRECIO_VENTA, PRECIO_COSTO, STOCK, STOCK_MINIMO, ACTIVO) 
-                     VALUES (:usuarioId, :categoriaId, :codigo, :nombre, :precioVenta, :precioCosto, :stock, :stock_minimo, 1)`;
+        const supabase = await getConnection();
 
         const precioVenta = producto.PRECIO_VENTA != null ? producto.PRECIO_VENTA : (producto.PRECIO ?? 0);
         const precioCosto = producto.PRECIO_COSTO != null ? producto.PRECIO_COSTO : precioVenta;
         const categoriaId = producto.CATEGORIA_ID != null ? producto.CATEGORIA_ID : (producto.CATEGORIA || null);
 
-        const params = {
-            usuarioId,
-            categoriaId: categoriaId || null,
-            codigo: producto.CODIGO,
-            nombre: producto.NOMBRE,
-            precioVenta,
-            precioCosto,
-            stock: producto.STOCK,
-            stock_minimo: producto.STOCK_MINIMO || 5
-        };
+        const { data, error } = await supabase
+            .from('productos')
+            .insert([{
+                usuario_id: usuarioId,
+                categoria_id: categoriaId || null,
+                codigo: producto.CODIGO,
+                nombre: producto.NOMBRE,
+                precio_venta: precioVenta,
+                precio_costo: precioCosto,
+                stock: producto.STOCK,
+                stock_minimo: producto.STOCK_MINIMO || 5,
+                activo: 1
+            }])
+            .select()
+            .single();
 
-        await conn.execute(sql, params, { autoCommit: true });
-        await conn.close();
-        return producto;
+        if (error) {
+            console.error('[PRODUCTOS] Error creating product:', error);
+            throw error;
+        }
+
+        return toOracleFormat(data);
     },
 
     async actualizar(id, producto) {
@@ -143,33 +215,29 @@ const productoModel = {
             return null;
         }
 
-        const conn = await getConnection();
-        const sql = `UPDATE PRODUCTOS SET 
-                     CODIGO = :codigo,
-                     NOMBRE = :nombre, 
-                     PRECIO_VENTA = :precioVenta, 
-                     PRECIO_COSTO = :precioCosto, 
-                     STOCK = :stock, 
-                     STOCK_MINIMO = :stock_minimo,
-                     CATEGORIA_ID = :categoriaId 
-                     WHERE ID = :id`;
+        const supabase = await getConnection();
 
         const precioVenta = producto.PRECIO_VENTA != null ? producto.PRECIO_VENTA : (producto.PRECIO ?? 0);
         const precioCosto = producto.PRECIO_COSTO != null ? producto.PRECIO_COSTO : precioVenta;
         const categoriaId = producto.CATEGORIA_ID != null ? producto.CATEGORIA_ID : null;
 
-        await conn.execute(sql, {
-            codigo: producto.CODIGO,
-            nombre: producto.NOMBRE,
-            precioVenta,
-            precioCosto,
-            stock: producto.STOCK,
-            stock_minimo: producto.STOCK_MINIMO,
-            categoriaId,
-            id
-        }, { autoCommit: true });
-        await conn.close();
-        return producto;
+        const { data, error } = await supabase
+            .from('productos')
+            .update({
+                codigo: producto.CODIGO,
+                nombre: producto.NOMBRE,
+                precio_venta: precioVenta,
+                precio_costo: precioCosto,
+                stock: producto.STOCK,
+                stock_minimo: producto.STOCK_MINIMO,
+                categoria_id: categoriaId
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return toOracleFormat(data);
     },
 
     async eliminar(id) {
@@ -182,10 +250,13 @@ const productoModel = {
             return false;
         }
 
-        const conn = await getConnection();
-        // Soft delete logic
-        await conn.execute('UPDATE PRODUCTOS SET ACTIVO = 0 WHERE ID = :id', { id }, { autoCommit: true });
-        await conn.close();
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('productos')
+            .update({ activo: 0 })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -198,9 +269,14 @@ const productoModel = {
             }
             return false;
         }
-        const conn = await getConnection();
-        await conn.execute('UPDATE PRODUCTOS SET ACTIVO = 1 WHERE ID = :id', { id }, { autoCommit: true });
-        await conn.close();
+
+        const supabase = await getConnection();
+        const { error } = await supabase
+            .from('productos')
+            .update({ activo: 1 })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     },
 
@@ -214,11 +290,35 @@ const productoModel = {
             return false;
         }
 
-        const conn = await getConnection();
-        await conn.execute('UPDATE PRODUCTOS SET STOCK = STOCK - :cantidad WHERE ID = :id', { cantidad, id }, { autoCommit: true });
-        await conn.close();
+        const supabase = await getConnection();
+
+        // First get current stock
+        const { data: producto, error: errorGet } = await supabase
+            .from('productos')
+            .select('stock')
+            .eq('id', id)
+            .single();
+
+        if (errorGet) throw errorGet;
+
+        // Update with new stock
+        const { error } = await supabase
+            .from('productos')
+            .update({ stock: producto.stock - cantidad })
+            .eq('id', id);
+
+        if (error) throw error;
         return true;
     }
 };
+
+// Simulated data (kept for USE_SIMULATION mode)
+let productosSimulados = [
+    { ID: 1, CODIGO: 'P001', NOMBRE: 'Arroz', PRECIO: 1.50, PRECIO_COSTO: 1.00, STOCK: 100, STOCK_MINIMO: 20, CATEGORIA_ID: 1, ACTIVO: 1 },
+    { ID: 2, CODIGO: 'P002', NOMBRE: 'Aceite', PRECIO: 2.50, PRECIO_COSTO: 2.00, STOCK: 50, STOCK_MINIMO: 10, CATEGORIA_ID: 2, ACTIVO: 1 },
+    { ID: 3, CODIGO: 'P003', NOMBRE: 'Leche', PRECIO: 1.00, PRECIO_COSTO: 0.75, STOCK: 30, STOCK_MINIMO: 15, CATEGORIA_ID: 3, ACTIVO: 1 },
+    { ID: 4, CODIGO: 'P004', NOMBRE: 'Azúcar', PRECIO: 1.20, PRECIO_COSTO: 0.90, STOCK: 5, STOCK_MINIMO: 20, CATEGORIA_ID: 4, ACTIVO: 1 }, // Bajo stock
+    { ID: 5, CODIGO: 'P005', NOMBRE: 'Sal', PRECIO: 0.50, PRECIO_COSTO: 0.30, STOCK: 80, STOCK_MINIMO: 10, CATEGORIA_ID: 4, ACTIVO: 1 }
+];
 
 module.exports = productoModel;
