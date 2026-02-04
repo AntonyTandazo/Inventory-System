@@ -1,0 +1,11 @@
+{
+    "name": "sistema-inventario",
+    "version": "1.0.0",
+    "description": "Sistema de Inventario con Supabase",
+    "scripts": {
+        "build": "cd frontend && npm install && npm run build"
+    },
+    "dependencies": {
+        "serverless-http": "^3.2.0"
+    }
+}

@@ -1,0 +1,29 @@
+[build]
+  # Comando para construir el frontend
+  command = "cd frontend && npm install && npm run build"
+  # Directorio donde está el build del frontend
+  publish = "frontend/dist"
+  # Directorio de funciones serverless (backend)
+  functions = "netlify/functions"
+
+[build.environment]
+  # Node version
+  NODE_VERSION = "18"
+
+# Configuración de las funciones serverless
+[functions]
+  # Directorio donde están los archivos del backend
+  node_bundler = "esbuild"
+  included_files = ["backend/**"]
+
+# Redirecciones para que /api/* vaya a las funciones serverless
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# Redirecciones para SPA (Single Page Application)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
