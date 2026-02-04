@@ -14,7 +14,10 @@
 [functions]
   # Directorio donde están los archivos del backend
   node_bundler = "esbuild"
+  # Include all backend files
   included_files = ["backend/**"]
+  # Don't bundle node_modules, use them as external
+  external_node_modules = ["@supabase/supabase-js", "express", "cors", "pg"]
 
 # Redirecciones para que /api/* vaya a las funciones serverless
 [[redirects]]
