@@ -1,5 +1,10 @@
+// Netlify Function wrapper for Express app
 const serverless = require('serverless-http');
+
+// Import the Express app
 const app = require('../../backend/app');
 
-// Exportar el handler para Netlify
-exports.handler = serverless(app);
+// Export the serverless handler
+const handler = serverless(app);
+
+module.exports = { handler };
