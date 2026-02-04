@@ -50,9 +50,9 @@ const configController = {
                 // Return user details including ID for frontend context
                 res.json({
                     token: 'mock-token',
-                    usuarioId: user.ID,  // ADD USER ID HERE
-                    usuario: user.USUARIO,
-                    negocio: user.NOMBRE_NEGOCIO
+                    usuarioId: user.id,  // Supabase returns lowercase 'id'
+                    usuario: user.usuario,  // Supabase returns lowercase 'usuario'
+                    negocio: user.nombre_negocio  // Supabase returns lowercase 'nombre_negocio'
                 });
             } else {
                 res.status(401).json({ error: 'Credenciales inválidas' });
