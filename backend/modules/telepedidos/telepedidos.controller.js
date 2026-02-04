@@ -1,4 +1,4 @@
-const oracledb = require('oracledb');
+
 const { getConnection } = require('../../config/database');
 
 const telepedidosController = {

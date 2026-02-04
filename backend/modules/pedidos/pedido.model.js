@@ -1,5 +1,4 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
-const oracledb = require('oracledb');
 const productoModel = require('../productos/producto.model');
 const clienteModel = require('../clientes/cliente.model');
 

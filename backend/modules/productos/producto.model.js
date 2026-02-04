@@ -1,5 +1,4 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
-const oracledb = require('oracledb');
 
 const productoModel = {
     async obtenerTodos(usuarioId = 1, incluirInactivos = false) {

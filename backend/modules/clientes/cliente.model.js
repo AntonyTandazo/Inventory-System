@@ -1,5 +1,4 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
-const oracledb = require('oracledb');
 
 let clientesSimulados = [
     { ID: 1, NOMBRE: 'Consumidor Final', TELEFONO: '', DIRECCION: '', DEUDA: 0, CEDULA: '9999999999', EMAIL: '', ESTADO: 'Activo', FECHA_REGISTRO: new Date() },

@@ -1,6 +1,5 @@
 const configModel = require('./config.model');
 const { getConnection } = require('../../config/database');
-const oracledb = require('oracledb');
 
 const configController = {
     getSettings(req, res) {

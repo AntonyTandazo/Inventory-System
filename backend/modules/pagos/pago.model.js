@@ -1,5 +1,4 @@
 const { getConnection, USE_SIMULATION } = require('../../config/database');
-const oracledb = require('oracledb');
 const clienteModel = require('../clientes/cliente.model');
 
 let pagosSimulados = [

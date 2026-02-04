@@ -102,7 +102,6 @@ const productoController = {
 
             // Validar PIN contra la base de datos
             const { getConnection } = require('../../config/database');
-            const oracledb = require('oracledb');
             const conn = await getConnection();
 
             try {
