@@ -5,7 +5,6 @@ const clienteModel = require('../clientes/cliente.model');
 
 const reporteModel = {
     async getGeneralStats(rango, usuarioId = 1) {
-        // rango: 'mes', 'trimestre', 'anio'
         const startDate = getStartDate(rango);
 
         if (USE_SIMULATION) {
@@ -16,7 +15,6 @@ const reporteModel = {
             const cantidadPedidos = filtered.length;
             const ticketPromedio = cantidadPedidos > 0 ? totalVentas / cantidadPedidos : 0;
 
-            // Trend (Simulated using current data buckets)
             const trend = {};
             filtered.forEach(p => {
                 const dateKey = new Date(p.FECHA).toLocaleDateString();
@@ -26,102 +24,82 @@ const reporteModel = {
             return { totalVentas, cantidadPedidos, ticketPromedio, trend };
         }
 
-        const conn = await getConnection();
-        try {
-            const sql = `SELECT SUM(TOTAL) as VENTAS, COUNT(*) as PEDIDOS 
-                         FROM PEDIDOS 
-                         WHERE USUARIO_ID = :usuarioId AND FECHA >= :startDate AND ESTADO != 'CANCELADO'`;
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('pedidos')
+            .select('total')
+            .eq('usuario_id', usuarioId)
+            .gte('fecha', startDate.toISOString())
+            .neq('estado', 'CANCELADO');
 
-            const result = await conn.execute(sql, { usuarioId, startDate }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            const row = result.rows[0];
+        if (error) throw error;
 
-            const totalVentas = row.VENTAS || 0;
-            const cantidadPedidos = row.PEDIDOS || 0;
-            const ticketPromedio = cantidadPedidos > 0 ? totalVentas / cantidadPedidos : 0;
+        const totalVentas = data.reduce((sum, p) => sum + p.total, 0);
+        const cantidadPedidos = data.length;
+        const ticketPromedio = cantidadPedidos > 0 ? totalVentas / cantidadPedidos : 0;
 
-            await conn.close();
-            return { totalVentas, cantidadPedidos, ticketPromedio, trend: {} };
-        } catch (e) {
-            await conn.close();
-            throw e;
-        }
+        return { totalVentas, cantidadPedidos, ticketPromedio, trend: {} };
     },
 
     async getTopProductos(rango, usuarioId = 1) {
         const startDate = getStartDate(rango);
+
         if (USE_SIMULATION) {
-            const pedidos = await pedidoModel.obtenerTodos(usuarioId);
-            const filtered = pedidos.filter(p => new Date(p.FECHA) >= startDate && p.ESTADO !== 'CANCELADO');
+            return [
+                { nombre: 'Leche Descremada', cantidad: 120, total: 240 },
+                { nombre: 'Arroz 5kg', cantidad: 85, total: 340 },
+                { nombre: 'Aceite Vegetal', cantidad: 50, total: 150 },
+                { nombre: 'Coca Cola 2L', cantidad: 200, total: 500 },
+                { nombre: 'Pan Molde', cantidad: 60, total: 120 },
+            ];
+        }
 
-            // Map items count
-            const productStats = {};
-            filtered.forEach(p => {
-                (p.ITEMS || []).forEach(item => { // Assuming ITEMS are populated
-                    if (!productStats[item.NOMBRE]) productStats[item.NOMBRE] = { cantidad: 0, total: 0 };
-                    productStats[item.NOMBRE].cantidad += item.cantidad;
-                    productStats[item.NOMBRE].total += (item.PRECIO * item.cantidad);
-                });
-            });
+        const supabase = await getConnection();
 
-            // If no items detail found (due to simulation limitations), generate dummy
-            if (Object.keys(productStats).length === 0) {
-                return [
-                    { nombre: 'Leche Descremada', cantidad: 120, total: 240 },
-                    { nombre: 'Arroz 5kg', cantidad: 85, total: 340 },
-                    { nombre: 'Aceite Vegetal', cantidad: 50, total: 150 },
-                    { nombre: 'Coca Cola 2L', cantidad: 200, total: 500 },
-                    { nombre: 'Pan Molde', cantidad: 60, total: 120 },
-                ];
+        // Get pedido_detalles with product info
+        const { data, error } = await supabase
+            .from('pedido_detalles')
+            .select(`
+                cantidad,
+                subtotal,
+                productos:producto_id (nombre),
+                pedidos:pedido_id (
+                    usuario_id,
+                    fecha,
+                    estado
+                )
+            `)
+            .gte('pedidos.fecha', startDate.toISOString())
+            .eq('pedidos.usuario_id', usuarioId)
+            .neq('pedidos.estado', 'CANCELADO');
+
+        if (error) {
+            console.error('Error getting top products:', error);
+            return [];
+        }
+
+        // Aggregate by product
+        const productStats = {};
+        data.forEach(item => {
+            if (item.productos && item.pedidos) {
+                const nombre = item.productos.nombre;
+                if (!productStats[nombre]) {
+                    productStats[nombre] = { cantidad: 0, total: 0 };
+                }
+                productStats[nombre].cantidad += item.cantidad;
+                productStats[nombre].total += item.subtotal;
             }
+        });
 
-            return Object.entries(productStats)
-                .map(([nombre, stat]) => ({ nombre, ...stat }))
-                .sort((a, b) => b.total - a.total)
-                .slice(0, 5);
-        }
-
-        const conn = await getConnection();
-        try {
-            // Using FETCH NEXT for Oracle 12c+ paging, or ROWNUM for older versions. 
-            // Standard SQL: FETCH FIRST 5 ROWS ONLY
-            const sql = `
-                SELECT 
-                    PR.NOMBRE, 
-                    SUM(PD.CANTIDAD) as CANTIDAD, 
-                    SUM(PD.SUBTOTAL) as TOTAL
-                FROM PEDIDO_DETALLES PD
-                JOIN PRODUCTOS PR ON PD.PRODUCTO_ID = PR.ID
-                JOIN PEDIDOS P ON PD.PEDIDO_ID = P.ID
-                WHERE P.USUARIO_ID = :usuarioId 
-                  AND P.FECHA >= :startDate 
-                  AND P.ESTADO != 'CANCELADO'
-                GROUP BY PR.NOMBRE
-                ORDER BY TOTAL DESC
-                FETCH FIRST 5 ROWS ONLY
-            `;
-
-            const result = await conn.execute(sql, {
-                usuarioId,
-                startDate
-            }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-            await conn.close();
-
-            // Map result to expected format
-            return result.rows.map(row => ({
-                nombre: row.NOMBRE,
-                cantidad: row.CANTIDAD,
-                total: row.TOTAL
-            }));
-        } catch (e) {
-            console.error('Error getting top products:', e);
-            await conn.close();
-            throw e;
-        }
+        return Object.entries(productStats)
+            .map(([nombre, stat]) => ({ nombre, ...stat }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 5);
     },
 
     async getTopClientes(rango, usuarioId = 1) {
         const startDate = getStartDate(rango);
+
         if (USE_SIMULATION) {
             const pedidos = await pedidoModel.obtenerTodos(usuarioId);
             const filtered = pedidos.filter(p => new Date(p.FECHA) >= startDate && p.ESTADO !== 'CANCELADO');
@@ -140,40 +118,37 @@ const reporteModel = {
                 .slice(0, 5);
         }
 
-        const conn = await getConnection();
-        try {
-            const sql = `
-                SELECT 
-                    C.NOMBRE, 
-                    COUNT(P.ID) as VISITAS, 
-                    SUM(P.TOTAL) as TOTAL
-                FROM PEDIDOS P
-                JOIN CLIENTES C ON P.CLIENTE_ID = C.ID
-                WHERE P.USUARIO_ID = :usuarioId 
-                  AND P.FECHA >= :startDate 
-                  AND P.ESTADO != 'CANCELADO'
-                GROUP BY C.NOMBRE
-                ORDER BY TOTAL DESC
-                FETCH FIRST 5 ROWS ONLY
-            `;
+        const supabase = await getConnection();
+        const { data, error } = await supabase
+            .from('pedidos')
+            .select(`
+                total,
+                clientes:cliente_id (nombre)
+            `)
+            .eq('usuario_id', usuarioId)
+            .gte('fecha', startDate.toISOString())
+            .neq('estado', 'CANCELADO');
 
-            const result = await conn.execute(sql, {
-                usuarioId,
-                startDate
-            }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-            await conn.close();
-
-            return result.rows.map(row => ({
-                nombre: row.NOMBRE,
-                visitas: row.VISITAS,
-                total: row.TOTAL
-            }));
-        } catch (e) {
-            console.error('Error getting top clients:', e);
-            await conn.close();
-            throw e;
+        if (error) {
+            console.error('Error getting top clients:', error);
+            return [];
         }
+
+        // Aggregate by client
+        const clientStats = {};
+        data.forEach(p => {
+            const nombre = p.clientes?.nombre || 'Consumidor Final';
+            if (!clientStats[nombre]) {
+                clientStats[nombre] = { visitas: 0, total: 0 };
+            }
+            clientStats[nombre].visitas += 1;
+            clientStats[nombre].total += p.total;
+        });
+
+        return Object.entries(clientStats)
+            .map(([nombre, stat]) => ({ nombre, ...stat }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 5);
     },
 
     async getVentasPorCategoria(rango, usuarioId = 1) {
@@ -181,54 +156,69 @@ const reporteModel = {
 
         if (USE_SIMULATION) {
             return [
-                { categoria: 'Frenos', total: 1500, porcentaje: 35 },
-                { categoria: 'Motor', total: 1200, porcentaje: 28 },
-                { categoria: 'Suspensión', total: 1000, porcentaje: 23 },
-                { categoria: 'Transmisión', total: 600, porcentaje: 14 }
+                { categoria: 'Granos', total: 1500, porcentaje: 35 },
+                { categoria: 'Grasas', total: 1200, porcentaje: 28 },
+                { categoria: 'Lácteos', total: 1000, porcentaje: 23 },
+                { categoria: 'Endulzantes', total: 600, porcentaje: 14 }
             ];
         }
 
-        const conn = await getConnection();
-        try {
-            // 1. Get total sales for the period to calculate percentages later
-            // We use FECHA here to be consistent with our previous fix
-            const sqlTotal = `SELECT SUM(TOTAL) as TOTAL_Ventas 
-                             FROM PEDIDOS 
-                             WHERE USUARIO_ID = :usuarioId AND FECHA >= :startDate AND ESTADO != 'CANCELADO'`;
+        const supabase = await getConnection();
 
-            const totalResult = await conn.execute(sqlTotal, { usuarioId, startDate }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            const totalGeneral = totalResult.rows[0].TOTAL_VENTAS || 0;
+        // Get total sales for percentage calculation
+        const { data: totalData, error: totalError } = await supabase
+            .from('pedidos')
+            .select('total')
+            .eq('usuario_id', usuarioId)
+            .gte('fecha', startDate.toISOString())
+            .neq('estado', 'CANCELADO');
 
-            // 2. Get sales per category
-            const sqlCat = `
-                SELECT 
-                    C.NOMBRE as CATEGORIA, 
-                    SUM(PD.SUBTOTAL) as TOTAL
-                FROM PEDIDO_DETALLES PD
-                JOIN PRODUCTOS PR ON PD.PRODUCTO_ID = PR.ID
-                JOIN CATEGORIAS C ON PR.CATEGORIA_ID = C.ID
-                JOIN PEDIDOS P ON PD.PEDIDO_ID = P.ID
-                WHERE P.USUARIO_ID = :usuarioId 
-                  AND P.FECHA >= :startDate 
-                  AND P.ESTADO != 'CANCELADO'
-                GROUP BY C.NOMBRE
-                ORDER BY TOTAL DESC
-            `;
+        if (totalError) throw totalError;
 
-            const result = await conn.execute(sqlCat, { usuarioId, startDate }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            await conn.close();
+        const totalGeneral = totalData.reduce((sum, p) => sum + p.total, 0);
 
-            // 3. Map result and calculate percentages
-            return result.rows.map(row => ({
-                categoria: row.CATEGORIA,
-                total: row.TOTAL,
-                porcentaje: totalGeneral > 0 ? Math.round((row.TOTAL / totalGeneral) * 100) : 0
-            }));
-        } catch (e) {
-            console.error('Error getting sales by category:', e);
-            await conn.close();
-            throw e;
+        // Get sales by category
+        const { data, error } = await supabase
+            .from('pedido_detalles')
+            .select(`
+                subtotal,
+                productos:producto_id (
+                    categorias:categoria_id (nombre)
+                ),
+                pedidos:pedido_id (
+                    usuario_id,
+                    fecha,
+                    estado
+                )
+            `)
+            .gte('pedidos.fecha', startDate.toISOString())
+            .eq('pedidos.usuario_id', usuarioId)
+            .neq('pedidos.estado', 'CANCELADO');
+
+        if (error) {
+            console.error('Error getting sales by category:', error);
+            return [];
         }
+
+        // Aggregate by category
+        const categoryStats = {};
+        data.forEach(item => {
+            if (item.productos?.categorias && item.pedidos) {
+                const categoria = item.productos.categorias.nombre;
+                if (!categoryStats[categoria]) {
+                    categoryStats[categoria] = 0;
+                }
+                categoryStats[categoria] += item.subtotal;
+            }
+        });
+
+        return Object.entries(categoryStats)
+            .map(([categoria, total]) => ({
+                categoria,
+                total,
+                porcentaje: totalGeneral > 0 ? Math.round((total / totalGeneral) * 100) : 0
+            }))
+            .sort((a, b) => b.total - a.total);
     }
 };
 
