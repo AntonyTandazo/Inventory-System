@@ -1,0 +1,18 @@
+services:
+  # Backend API Service
+  - type: web
+    name: inventori-system-backend
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: SUPABASE_URL
+        value: https://tbhizjwopvtexfyictdc.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRiaGl6andvcHZ0ZXhmeWljdGRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzgzNjQ0MjYsImV4cCI6MjA1Mzk0MDQyNn0.PvlGi2iiEB-9TjpUcWtmw_y3u2wSDQ
+      - key: DB_SIMULATION
+        value: false
+      - key: NODE_ENV
+        value: production
