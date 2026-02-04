@@ -1,8 +1,10 @@
 [build]
-  # Comando para construir el frontend
-  command = "cd frontend && npm install && npm run build"
-  # Directorio donde está el build del frontend
-  publish = "frontend/dist"
+  # Base directory - Netlify ejecutará comandos desde aquí
+  base = "frontend"
+  # Comando para construir (ya estamos en /frontend, no necesitamos cd)
+  command = "npm install && npm run build"
+  # Directorio de publicación (relativo a base)
+  publish = "dist"
 
 [build.environment]
   # Node version
