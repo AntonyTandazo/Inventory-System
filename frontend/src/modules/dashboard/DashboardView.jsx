@@ -52,10 +52,10 @@ const DashboardView = ({ onNavigate, storeName }) => {
         return [...orders].sort((a, b) => new Date(b.FECHA) - new Date(a.FECHA)).slice(0, 4);
     }, [orders]);
 
-    // Stock Alerts (Low stock < 20, Top 3 lowest)
+    // Stock Alerts (products with stock at or below their minimum)
     const stockAlerts = useMemo(() => {
         return [...products]
-            .filter(p => p.STOCK < 20) // Threshold from image context (ex: milk min 20)
+            .filter(p => p.STOCK <= p.STOCK_MINIMO)
             .sort((a, b) => a.STOCK - b.STOCK)
             .slice(0, 3);
     }, [products]);
@@ -165,10 +165,10 @@ const DashboardView = ({ onNavigate, storeName }) => {
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#9a3412', marginBottom: '4px' }}>
                                     <span>Stock actual: {product.STOCK}</span>
-                                    <span>Mín: 20</span>
+                                    <span>Mín: {product.STOCK_MINIMO}</span>
                                 </div>
                                 <div style={{ width: '100%', height: '6px', backgroundColor: '#fed7aa', borderRadius: '3px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${Math.min((product.STOCK / 20) * 100, 100)}%`, height: '100%', backgroundColor: '#f97316' }}></div>
+                                    <div style={{ width: `${Math.min((product.STOCK / product.STOCK_MINIMO) * 100, 100)}%`, height: '100%', backgroundColor: '#f97316' }}></div>
                                 </div>
                             </div>
                         ))}

@@ -73,47 +73,32 @@ const productoModel = {
         const supabase = await getConnection();
 
         try {
-            // Get total count
-            const { count: total, error: errorTotal } = await supabase
+            // Fetch all active products with necessary fields
+            const { data: productos, error } = await supabase
                 .from('productos')
-                .select('*', { count: 'exact', head: true })
+                .select('stock, stock_minimo, precio_venta')
                 .eq('activo', 1)
                 .eq('usuario_id', usuarioId);
 
-            // Get low stock count
-            const { count: bajoStock, error: errorBajo } = await supabase
-                .from('productos')
-                .select('*', { count: 'exact', head: true })
-                .eq('activo', 1)
-                .eq('usuario_id', usuarioId)
-                .lte('stock', supabase.raw('stock_minimo'));
-
-            // Get critical stock count  
-            const { count: critico, error: errorCritico } = await supabase
-                .from('productos')
-                .select('*', { count: 'exact', head: true })
-                .eq('activo', 1)
-                .eq('usuario_id', usuarioId)
-                .lt('stock', supabase.raw('stock_minimo'));
-
-            // Get inventory value - need to fetch data for calculation
-            const { data: productos, error: errorValor } = await supabase
-                .from('productos')
-                .select('precio_venta, stock')
-                .eq('activo', 1)
-                .eq('usuario_id', usuarioId);
-
-            const valorInventario = productos?.reduce((sum, p) => sum + (p.precio_venta * p.stock), 0) || 0;
-
-            if (errorTotal || errorBajo || errorCritico || errorValor) {
-                console.error('Error getting stats:', errorTotal || errorBajo || errorCritico || errorValor);
+            if (error) {
+                console.error('Error getting products for stats:', error);
                 return { total: 0, bajoStock: 0, critico: 0, valorInventario: 0 };
             }
 
+            if (!productos || productos.length === 0) {
+                return { total: 0, bajoStock: 0, critico: 0, valorInventario: 0 };
+            }
+
+            // Calculate statistics in JavaScript
+            const total = productos.length;
+            const bajoStock = productos.filter(p => p.stock <= p.stock_minimo && p.stock > 0).length;
+            const critico = productos.filter(p => p.stock < p.stock_minimo).length;
+            const valorInventario = productos.reduce((sum, p) => sum + (p.precio_venta * p.stock), 0);
+
             return {
-                total: total || 0,
-                bajoStock: bajoStock || 0,
-                critico: critico || 0,
+                total,
+                bajoStock,
+                critico,
                 valorInventario: parseFloat(valorInventario.toFixed(2))
             };
         } catch (e) {
