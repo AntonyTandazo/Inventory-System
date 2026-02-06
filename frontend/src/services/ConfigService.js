@@ -4,18 +4,20 @@ import { API_CONFIG } from '../config/api';
 const API_URL = API_CONFIG.ENDPOINTS.CONFIG;
 
 export const ConfigService = {
-    async getSettings() {
-        const response = await axios.get(API_URL);
+    async getSettings(usuarioId) {
+        const params = usuarioId ? { usuarioId } : {};
+        const response = await axios.get(API_URL, { params });
         return response.data;
     },
 
-    async updateSettings(settings, pin) {
-        const response = await axios.post(API_URL, { settings, pin });
+    async updateSettings(settings, pin, usuarioId) {
+        const response = await axios.post(API_URL, { settings, pin, usuarioId });
         return response.data;
     },
 
     async verifyPin(pin) {
-        const response = await axios.post(`${API_URL}/verify-pin`, { pin });
+        const usuarioId = localStorage.getItem('usuarioId');
+        const response = await axios.post(`${API_URL}/verify-pin`, { pin, usuarioId });
         return response.data;
     },
 
@@ -25,7 +27,8 @@ export const ConfigService = {
     },
 
     async restoreBackup(data, pin) {
-        const response = await axios.post(`${API_URL}/restore`, { data, pin });
+        const usuarioId = localStorage.getItem('usuarioId');
+        const response = await axios.post(`${API_URL}/restore`, { data, pin, usuarioId });
         return response.data;
     },
 

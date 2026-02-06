@@ -1,6 +1,6 @@
 {
   "negocio": {
-    "nombre": "InventoryGore2.0",
+    "nombre": "Inventory-Gore",
     "telefono": "",
     "email": "eldeatgunt2070@gmail.com",
     "direccion": ""
@@ -16,7 +16,7 @@
     "transferencia": true
   },
   "seguridad": {
-    "pin": "8520"
+    "pin": "8523"
   },
   "adminUser": {
     "usuario": "Tandazo",

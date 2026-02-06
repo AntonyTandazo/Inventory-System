@@ -26,10 +26,11 @@ if (!fs.existsSync(CONFIG_FILE)) {
 }
 
 const configModel = {
-    getSettings() {
+    // Helper for synchronous local file access
+    _getLocalSettings() {
         try {
             const data = fs.readFileSync(CONFIG_FILE, 'utf8');
-            const settings = JSON.parse(data);
+            let settings = JSON.parse(data);
 
             // Ensure adminUser exists (Migration for existing files)
             if (!settings.adminUser) {
@@ -39,18 +40,42 @@ const configModel = {
                     nombre: 'Administrador',
                     email: 'admin@example.com'
                 };
-                // Optional: Save it back so we don't check every time
-                try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(settings, null, 2)); } catch (e) { }
             }
-
             return settings;
         } catch (e) {
             return {};
         }
     },
 
-    saveSettings(newSettings) {
-        const current = this.getSettings();
+    async getSettings(usuarioId) {
+        const settings = this._getLocalSettings();
+
+        if (usuarioId && !USE_SIMULATION) {
+            try {
+                const supabase = await getConnection();
+                const { data: user, error } = await supabase
+                    .from('usuarios')
+                    .select('nombre_negocio, email, pin_seguridad')
+                    .eq('id', usuarioId)
+                    .single();
+
+                if (user) {
+                    if (!settings.negocio) settings.negocio = {};
+                    if (!settings.seguridad) settings.seguridad = {};
+                    // Merge DB data into settings
+                    if (user.nombre_negocio) settings.negocio.nombre = user.nombre_negocio;
+                    if (user.email) settings.negocio.email = user.email;
+                    if (user.pin_seguridad) settings.seguridad.pin = user.pin_seguridad;
+                }
+            } catch (error) {
+                console.error('Error fetching user settings from DB:', error);
+            }
+        }
+        return settings;
+    },
+
+    async saveSettings(newSettings, usuarioId) {
+        const current = this._getLocalSettings();
         const updated = { ...current, ...newSettings };
 
         // Deep merge logic
@@ -60,7 +85,27 @@ const configModel = {
         if (newSettings.seguridad) updated.seguridad = { ...current.seguridad, ...newSettings.seguridad };
         if (newSettings.adminUser) updated.adminUser = { ...current.adminUser, ...newSettings.adminUser };
 
+        // Save to file (Global config)
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(updated, null, 2));
+
+        // Save to DB (User specific config)
+        if (usuarioId && !USE_SIMULATION) {
+            try {
+                const supabase = await getConnection();
+                const updates = {};
+                // Only update fields that exist in USUARIOS table
+                if (newSettings.negocio && newSettings.negocio.nombre) updates.nombre_negocio = newSettings.negocio.nombre;
+                if (newSettings.negocio && newSettings.negocio.email) updates.email = newSettings.negocio.email;
+                if (newSettings.seguridad && newSettings.seguridad.pin) updates.pin_seguridad = newSettings.seguridad.pin;
+
+                if (Object.keys(updates).length > 0) {
+                    await supabase.from('usuarios').update(updates).eq('id', usuarioId);
+                }
+            } catch (error) {
+                console.error('Error saving user settings to DB:', error);
+            }
+        }
+
         return updated;
     },
 
@@ -103,7 +148,7 @@ const configModel = {
     },
 
     async registerUser(userData) {
-        // userData: { usuario, password, email, negocio }
+        // userData: { usuario, password, email, negocio, pin }
         if (USE_SIMULATION) {
             this.saveSettings({
                 adminUser: {
@@ -112,7 +157,8 @@ const configModel = {
                     email: userData.email,
                     nombre: userData.nombre
                 },
-                negocio: { nombre: userData.negocio, email: userData.email }
+                negocio: { nombre: userData.negocio, email: userData.email },
+                seguridad: { pin: userData.pin || '1234' }
             });
             return { id: 1, ...userData };
         }
@@ -127,7 +173,8 @@ const configModel = {
                         usuario: userData.usuario,
                         password: userData.password,
                         email: userData.email,
-                        nombre_negocio: userData.negocio
+                        nombre_negocio: userData.negocio,
+                        pin_seguridad: userData.pin
                     }
                 ])
                 .select()
@@ -146,9 +193,30 @@ const configModel = {
         }
     },
 
-    verifyPin(inputPin) {
-        const settings = this.getSettings();
-        return settings.seguridad.pin === inputPin;
+    async verifyPin(inputPin, usuarioId) {
+        const settings = this._getLocalSettings();
+
+        if (usuarioId && !USE_SIMULATION) {
+            try {
+                const supabase = await getConnection();
+                const { data, error } = await supabase
+                    .from('usuarios')
+                    .select('pin_seguridad')
+                    .eq('id', usuarioId)
+                    .single();
+
+                if (data) {
+                    // Ensure robust comparison (string vs number)
+                    return String(data.pin_seguridad) === String(inputPin);
+                }
+            } catch (error) {
+                console.error('Error verifying PIN from DB:', error);
+            }
+        }
+
+        // Fallback to local settings (for simulation or legacy)
+        // Also if DB query fails or returns no user (shouldn't happen if logged in)
+        return String(settings.seguridad.pin) === String(inputPin);
     },
 
     // ... backup methods (generateBackup, restoreBackup) kept as is or updated if needed

@@ -2,9 +2,10 @@ const configModel = require('./config.model');
 const { getConnection } = require('../../config/database');
 
 const configController = {
-    getSettings(req, res) {
+    async getSettings(req, res) {
         try {
-            const settings = configModel.getSettings();
+            const { usuarioId } = req.query;
+            const settings = await configModel.getSettings(usuarioId);
             // Don't send PIN in clear text if possible, but for edit form we might need it? 
             // Better to NOT send PIN back.
             const { seguridad, ...rest } = settings;
@@ -14,26 +15,28 @@ const configController = {
         }
     },
 
-    updateSettings(req, res) {
+    async updateSettings(req, res) {
         try {
-            const { pin, settings } = req.body;
+            const { pin, settings, usuarioId } = req.body;
             // Verify PIN for sensitive changes if needed, or if it's a general save
             // Logic: If user is saving "Business Info", they provided a PIN in the UI modal.
-            if (!configModel.verifyPin(pin)) {
+            // Logic: If user is saving "Business Info", they provided a PIN in the UI modal.
+            const isValid = await configModel.verifyPin(pin, usuarioId);
+            if (!isValid) {
                 return res.status(403).json({ error: 'PIN Incorrecto' });
             }
 
-            const updated = configModel.saveSettings(settings);
+            const updated = await configModel.saveSettings(settings, usuarioId);
             res.json(updated);
         } catch (error) {
             res.status(500).json({ error: error.message });
         }
     },
 
-    verifyPin(req, res) {
+    async verifyPin(req, res) {
         try {
-            const { pin } = req.body;
-            const isValid = configModel.verifyPin(pin);
+            const { pin, usuarioId } = req.body;
+            const isValid = await configModel.verifyPin(pin, usuarioId);
             res.json({ valid: isValid });
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -71,7 +74,7 @@ const configController = {
             if (!usuario || !password) return res.status(400).json({ error: 'Usuario y Contraseña requeridos' });
 
             // Call model to register (DB or Simulation)
-            const newUser = await configModel.registerUser({ usuario, password, nombre, negocio, email });
+            const newUser = await configModel.registerUser({ usuario, password, nombre, negocio, email, pin });
 
             // Note: PIN is currently stored in settings.json (simulation) or needs to be in DB.
             // Since DB schema provided by user DOES NOT HAVE PIN, we might lose it for DB users unless we add it.
@@ -107,8 +110,9 @@ const configController = {
 
     async restoreBackup(req, res) {
         try {
-            const { pin, data } = req.body;
-            if (!configModel.verifyPin(pin)) {
+            const { pin, data, usuarioId } = req.body;
+            const isValid = await configModel.verifyPin(pin, usuarioId);
+            if (!isValid) {
                 return res.status(403).json({ error: 'PIN Incorrecto' });
             }
 

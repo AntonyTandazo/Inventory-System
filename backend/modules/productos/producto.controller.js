@@ -100,33 +100,14 @@ const productoController = {
                 });
             }
 
-            // Validar PIN contra la base de datos
-            const { getConnection } = require('../../config/database');
-            const conn = await getConnection();
+            // Validar PIN usando configModel
+            const configModel = require('../config/config.model');
+            const pinCorrecto = await configModel.verifyPin(pin, usuarioId);
 
-            try {
-                const result = await conn.execute(
-                    'SELECT PIN_SEGURIDAD FROM USUARIOS WHERE ID = :usuarioId',
-                    { usuarioId },
-                    { outFormat: oracledb.OUT_FORMAT_OBJECT }
-                );
-
-                await conn.close();
-
-                if (!result.rows || result.rows.length === 0) {
-                    return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-                }
-
-                const pinCorrecto = result.rows[0].PIN_SEGURIDAD;
-
-                if (pin !== pinCorrecto) {
-                    return res.status(403).json({
-                        mensaje: 'PIN de seguridad incorrecto'
-                    });
-                }
-            } catch (dbError) {
-                await conn.close();
-                throw dbError;
+            if (!pinCorrecto) {
+                return res.status(403).json({
+                    mensaje: 'PIN de seguridad incorrecto'
+                });
             }
 
             // Si el PIN es correcto, proceder con la eliminación

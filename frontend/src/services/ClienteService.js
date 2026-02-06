@@ -29,8 +29,10 @@ export const ClienteService = {
         const response = await axios.put(`${API_URL}/${id}`, cliente);
         return response.data;
     },
-    async eliminar(id) {
-        const response = await axios.delete(`${API_URL}/${id}`);
+    async eliminar(id, pin, usuarioId) {
+        const response = await axios.delete(`${API_URL}/${id}`, {
+            data: { pin, usuarioId }
+        });
         return response.data;
     },
     async registrarPago(id, monto) {

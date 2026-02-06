@@ -46,12 +46,20 @@ const ClientesView = () => {
     };
 
     const verifyPinAndDelete = async () => {
-        if (pinInput === '8520') { // TODO: Get from AuthService or backend
+        try {
+            const usuarioId = AuthService.getUserId();
+            await ClienteService.eliminar(pendingDeleteId, pinInput, usuarioId);
             setShowPinModal(false);
-            await eliminar(pendingDeleteId);
-        } else {
-            alert('PIN incorrecto');
+            setPendingDeleteId(null);
+            cargarDatos();
+        } catch (e) {
+            console.error(e);
+            alert(e.response?.data?.mensaje || 'Error al eliminar cliente. Verifique su PIN.');
         }
+    };
+
+    const eliminar = (id) => {
+        requestDelete(id);
     };
 
     const exportToExcel = () => {
@@ -122,17 +130,6 @@ const ClientesView = () => {
             const errorMsg = e.response?.data?.mensaje || e.message || 'Error al guardar cliente';
             alert(errorMsg);
             console.error('Error al guardar cliente:', e);
-        }
-    };
-
-    const eliminar = async (id) => {
-        if (window.confirm('¿Deseas eliminar a este cliente permanentemente?')) {
-            try {
-                await ClienteService.eliminar(id);
-                cargarDatos();
-            } catch (e) {
-                alert('Error al eliminar');
-            }
         }
     };
 

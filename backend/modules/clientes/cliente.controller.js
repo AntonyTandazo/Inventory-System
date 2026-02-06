@@ -55,6 +55,23 @@ const clienteController = {
     async borrar(req, res) {
         try {
             const { id } = req.params;
+            const { pin, usuarioId } = req.body;
+
+            // Validar que se envió el PIN
+            if (!pin) {
+                return res.status(400).json({
+                    mensaje: 'Se requiere PIN de seguridad para eliminar'
+                });
+            }
+
+            // Validar PIN
+            const configModel = require('../config/config.model');
+            const pinValido = await configModel.verifyPin(pin, usuarioId);
+
+            if (!pinValido) {
+                return res.status(403).json({ mensaje: 'PIN de seguridad incorrecto' });
+            }
+
             const eliminado = await clienteModel.eliminar(id);
             if (eliminado) {
                 res.json({ mensaje: 'Cliente eliminado correctamente' });

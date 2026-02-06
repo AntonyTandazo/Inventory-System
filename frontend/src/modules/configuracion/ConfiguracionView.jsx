@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ConfigService } from '../../services/ConfigService';
+import { AuthService } from '../../services/AuthService';
 import SecurityPinModal from './SecurityPinModal';
 import ChangeCredentialModal from './ChangeCredentialModal';
 import { Save, ShieldAlert, Download, RefreshCw, Trash2, Key, Bell, CreditCard } from 'lucide-react';
@@ -19,7 +20,8 @@ const ConfiguracionView = () => {
 
     const loadSettings = async () => {
         try {
-            const data = await ConfigService.getSettings();
+            const userId = AuthService.getUserId();
+            const data = await ConfigService.getSettings(userId);
             setSettings(prev => ({ ...prev, ...data }));
         } catch (e) {
             console.error(e);
@@ -42,7 +44,8 @@ const ConfiguracionView = () => {
         const { action } = authModal;
         try {
             if (action === 'SAVE') {
-                await ConfigService.updateSettings({ ...settings }, pin);
+                const userId = AuthService.getUserId();
+                await ConfigService.updateSettings({ ...settings }, pin, userId);
                 alert('Configuración guardada correctamente.');
             } else if (action === 'RESTORE') {
                 // In a real app, showing file picker here
